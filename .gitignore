@@ -1,10 +1,13 @@
-# Signing material must never be committed (repo is public)
+# Signing material must never be committed (public repo)
 keystore/
 *.p12
 *.jks
 *.keystore
 
-# Build output
+# Build output and fetched third-party jar
 build/
+out/
+tools/bundletool.jar
+windows/assets/
 *.apk
 *.exe
