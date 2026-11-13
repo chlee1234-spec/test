@@ -118,11 +118,13 @@ jobs:
           java-version: '17'
       - name: Engine self-check on this pet's XML
         run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/build.log") 2>&1
           mkdir -p /tmp/cls
           javac -d /tmp/cls android/app/src/main/java/com/petforge/core/*.java android/test/EngineCheck.java
           java -cp /tmp/cls EngineCheck "pets/${{ matrix.pet }}/animations.xml"
       - name: Install pet into the app
         run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/build.log") 2>&1
           mkdir -p android/app/src/main/assets
           cp "pets/${{ matrix.pet }}/animations.xml" android/app/src/main/assets/animations.xml
           cp "pets/${{ matrix.pet }}/icon.png" android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
@@ -134,13 +136,15 @@ jobs:
           PY
       - name: Accept SDK licences and install platform
         run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/build.log") 2>&1
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
       - name: Build apk (official Android Gradle Plugin)
         working-directory: android
         run: |
+          exec > >(tee -a "$GITHUB_WORKSPACE/build.log") 2>&1
           gradle wrapper --gradle-version 8.9 --no-daemon
-          ./gradlew assembleRelease --no-daemon -PpetId="${{ matrix.pet }}" -PpetName="$PET_NAME" 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          ./gradlew assembleRelease --no-daemon -PpetId="${{ matrix.pet }}" -PpetName="$PET_NAME"
       - name: Publish build log on failure
         if: failure()
         shell: bash
