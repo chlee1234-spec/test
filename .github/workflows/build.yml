@@ -125,7 +125,7 @@ jobs:
       - name: Install pet into the app
         run: |
           exec > >(tee -a "$GITHUB_WORKSPACE/build.log") 2>&1
-          mkdir -p android/app/src/main/assets
+          mkdir -p android/app/src/main/assets android/app/src/main/res/mipmap-xxhdpi
           cp "pets/${{ matrix.pet }}/animations.xml" android/app/src/main/assets/animations.xml
           cp "pets/${{ matrix.pet }}/icon.png" android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           python3 - <<'PY' >> "$GITHUB_ENV"
