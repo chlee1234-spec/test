@@ -3,7 +3,7 @@ name: Build pets
 # Push pets/<id>/animations.xml (made by make.py) -> Windows zip + Android apk -> GitHub Release "pet-<id>".
 on:
   push:
-    paths: ['pets/**']
+    paths: ['pets/**', '.github/workflows/build.yml', 'android/**']
   workflow_dispatch:
     inputs:
       pet:
