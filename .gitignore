@@ -1,0 +1,10 @@
+# Signing material must never be committed (repo is public)
+keystore/
+*.p12
+*.jks
+*.keystore
+
+# Build output
+build/
+*.apk
+*.exe
