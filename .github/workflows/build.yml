@@ -1,0 +1,188 @@
+name: Build pets
+
+# Push pets/<id>/animations.xml (made by make.py) -> Windows zip + Android apk -> GitHub Release "pet-<id>".
+on:
+  push:
+    paths: ['pets/**']
+  workflow_dispatch:
+    inputs:
+      pet:
+        description: 'Pet id (folder under pets/); empty = all'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  # Original desktopPet source, pinned. The Windows app is built from it unchanged,
+  # except that src/Resources/animations.xml (the default pet) is replaced by the pet.
+  DESKTOPPET_REF: 72c0fca54bdf6204f7f9d223cc4284278a0f09b9
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      pets: ${{ steps.d.outputs.pets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: d
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.pet }}" ]; then
+            list="${{ github.event.inputs.pet }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            list=$(ls pets)
+          else
+            list=$(git diff --name-only HEAD^ HEAD -- pets 2>/dev/null | cut -d/ -f2 | sort -u || true)
+            [ -n "$list" ] || list=$(ls pets)
+          fi
+          out=$(for p in $list; do [ -f "pets/$p/animations.xml" ] && echo "$p"; done | jq -R . | jq -sc .)
+          echo "pets=$out" >> "$GITHUB_OUTPUT"
+          echo "pets: $out"
+
+  windows:
+    needs: detect
+    if: needs.detect.outputs.pets != '[]'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pet: ${{ fromJson(needs.detect.outputs.pets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: Adrianotiger/desktopPet
+          ref: ${{ env.DESKTOPPET_REF }}
+          path: orig
+      - name: Inject pet as the default pet
+        shell: pwsh
+        run: |
+          Copy-Item "pets/${{ matrix.pet }}/animations.xml" "orig/src/Resources/animations.xml" -Force
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+      - name: Restore
+        run: nuget restore orig/src/DesktopPet_Portable.sln
+      - name: Build (same command as the original build_nosign.yml)
+        shell: pwsh
+        run: |
+          msbuild orig/src/DesktopPet_Portable.sln -p:Configuration=Release -p:RestorePackages=false *> build.log
+          $code = $LASTEXITCODE
+          Get-Content build.log -Tail 60
+          exit $code
+      - name: Publish build log on failure
+        if: failure()
+        shell: bash
+        run: |
+          [ -f build.log ] || echo "no build.log (failed before the build step)" > build.log
+          cp build.log "$RUNNER_TEMP/build.log"
+          git config user.name github-actions
+          git config user.email actions@users.noreply.github.com
+          git checkout --orphan logs-tmp
+          git rm -rf --quiet . || true
+          cp "$RUNNER_TEMP/build.log" build.log
+          git add -f build.log 2>/dev/null || true
+          git commit -q -m "build log ${{ matrix.pet }} windows" || true
+          git push -f origin logs-tmp:buildlog-${{ matrix.pet }}-windows
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "orig/build/DesktopPetPortable/bin/Release/x64"
+          if (-not (Test-Path "$out/DesktopPet.exe")) { throw "DesktopPet.exe not found in $out" }
+          $dir = "pkg/${{ matrix.pet }}"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item "$out/*" $dir -Recurse -Exclude "*.pdb","*.xml"
+          Rename-Item "$dir/DesktopPet.exe" "${{ matrix.pet }}.exe"
+          Compress-Archive -Path $dir -DestinationPath "${{ matrix.pet }}-windows.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pet }}-windows
+          path: ${{ matrix.pet }}-windows.zip
+
+  android:
+    needs: detect
+    if: needs.detect.outputs.pets != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pet: ${{ fromJson(needs.detect.outputs.pets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Engine self-check on this pet's XML
+        run: |
+          mkdir -p /tmp/cls
+          javac -d /tmp/cls android/app/src/main/java/com/petforge/core/*.java android/test/EngineCheck.java
+          java -cp /tmp/cls EngineCheck "pets/${{ matrix.pet }}/animations.xml"
+      - name: Install pet into the app
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp "pets/${{ matrix.pet }}/animations.xml" android/app/src/main/assets/animations.xml
+          cp "pets/${{ matrix.pet }}/icon.png" android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import re
+          s = open("pets/${{ matrix.pet }}/animations.xml", encoding="utf-8").read()
+          m = re.search(r"<petname>(.*?)</petname>", s)
+          print("PET_NAME=" + (m.group(1) if m else "${{ matrix.pet }}"))
+          PY
+      - name: Accept SDK licences and install platform
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
+      - name: Build apk (official Android Gradle Plugin)
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.9 --no-daemon
+          ./gradlew assembleRelease --no-daemon -PpetId="${{ matrix.pet }}" -PpetName="$PET_NAME" 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+      - name: Publish build log on failure
+        if: failure()
+        shell: bash
+        run: |
+          [ -f build.log ] || echo "no build.log (failed before the build step)" > build.log
+          cp build.log "$RUNNER_TEMP/build.log"
+          git config user.name github-actions
+          git config user.email actions@users.noreply.github.com
+          git checkout --orphan logs-tmp
+          git rm -rf --quiet . || true
+          cp "$RUNNER_TEMP/build.log" build.log
+          git add -f build.log 2>/dev/null || true
+          git commit -q -m "build log ${{ matrix.pet }} android" || true
+          git push -f origin logs-tmp:buildlog-${{ matrix.pet }}-android
+      - name: Collect
+        run: cp android/app/build/outputs/apk/release/app-release.apk "${{ matrix.pet }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pet }}-android
+          path: ${{ matrix.pet }}.apk
+
+  release:
+    needs: [detect, windows, android]
+    if: needs.detect.outputs.pets != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          merge-multiple: true
+      - name: Publish releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for p in $(echo '${{ needs.detect.outputs.pets }}' | jq -r '.[]'); do
+            tag="pet-$p"
+            files="dl/$p.apk dl/$p-windows.zip pets/$p/preview.gif"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" $files --clobber
+            else
+              gh release create "$tag" $files --title "$p" --notes "Built from pets/$p by commit ${GITHUB_SHA::7}. Windows: unzip, run $p.exe. Android: install apk, allow 'display over other apps'."
+            fi
+          done

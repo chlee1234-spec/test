@@ -4,10 +4,16 @@ keystore/
 *.jks
 *.keystore
 
-# Build output and fetched third-party jar
+# Local build output
 build/
 out/
-tools/bundletool.jar
-windows/assets/
+android/.gradle/
+android/gradle/
+android/gradlew*
+android/local.properties
+android/app/build/
+android/app/src/main/assets/
+android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+__pycache__/
 *.apk
 *.exe

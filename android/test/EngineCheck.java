@@ -5,7 +5,7 @@ import java.io.FileInputStream;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Desktop-JVM check of the Java engine, mirroring engine/engine_test.go. usage: EngineCheck pet.txt */
+/** Desktop-JVM check of the Java engine, usage: EngineCheck animations.xml */
 public class EngineCheck {
     static int failures = 0;
 
@@ -32,7 +32,7 @@ public class EngineCheck {
             check(got == (Integer) c[1], "Eval(" + c[0] + ") = " + got + ", want " + c[1]);
         }
 
-        PetEngine.Pet pet = PetEngine.parse(new FileInputStream(args[0]));
+        PetEngine.Pet pet = PetEngine.parseXml(new FileInputStream(args[0]));
         for (long seed = 1; seed <= 20; seed++) {
             PetEngine e = new PetEngine(pet, 1, seed);
             e.setEnv(1280, 800, 1280, 760);
